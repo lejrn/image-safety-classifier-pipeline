@@ -1,0 +1,55 @@
+# CLIP-based production training config (at-scale reference)
+#
+# This demo already runs the real, smaller-scale version of this architecture
+# (src/pipeline/embed.py + train.py): frozen openai/clip-vit-base-patch32 +
+# a linear-probe head trained on GPU via fastai. This file documents how the
+# same architecture scales up in production at a stealth LLM shop:
+#   transformers (CLIPModel) + torch + peft (optional LoRA on the vision tower)
+#   + accelerate, over a much larger moderation-labeled image dataset.
+
+model_name: openai/clip-vit-base-patch32
+task: image_classification
+num_labels: 2
+
+head:
+  type: linear_probe        # frozen encoder + logistic head; set peft.enabled for LoRA instead
+  embedding_dim: 512
+  framework: fastai
+
+training:
+  learning_rate: 1.0e-4
+  per_device_train_batch_size: 32
+  num_train_epochs: 5
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  evaluation_strategy: epoch
+  save_strategy: epoch
+  load_best_model_at_end: true
+  metric_for_best_model: recall
+  seed: 42
+
+peft:
+  enabled: false             # true = LoRA-tune the CLIP vision tower instead of a pure linear probe
+  lora_r: 8
+  lora_alpha: 16
+  target_modules: [q_proj, v_proj]
+
+data:
+  image_field: image_path
+  label_field: is_flagged
+  category_field: category
+  image_size: 224
+  train_val_split: 0.9
+
+eval:
+  metric: precision_recall_curve
+  target_recall: 0.98
+  report_precision_at_target_recall: true
+
+registry:
+  hub_model_id: your-org/image-safety-clip-classifier
+  mlflow_experiment: image-moderation-safety
+
+serving:
+  export_onnx: true
+  triton_model_name: image_safety_classifier
